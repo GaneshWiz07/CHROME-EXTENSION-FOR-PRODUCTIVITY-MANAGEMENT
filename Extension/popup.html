@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width">
+<head>
+  <title>Productivity Tracker</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1><span id="logo">FocusGuard</span>-Productivity Tracker</h1>
+    
+    <div class="stats-section">
+      <h2>Today's Statistics</h2>
+      <div id="timeStats"></div>
+    </div>
+
+    <div class="block-section">
+      <h2>Block Sites</h2>
+      <div class="input-group">
+        <input type="text" id="siteInput" placeholder="Enter website (e.g., facebook.com)">
+        <button id="addSite">Add</button>
+      </div>
+      <ul id="blockedSites"></ul>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
