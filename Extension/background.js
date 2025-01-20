@@ -1,173 +1,138 @@
-// Track active tabs and their time
-let startTime = null;
-let currentTabId = null;
-let currentDomain = null;
-let isTracking = false;
+import { getCurrentTab } from './utils.js';
 
-// Initialize or load blocked sites
-chrome.storage.local.get(['blockedSites', 'lastStatsReset'], function(result) {
-  if (!result.blockedSites) {
-    chrome.storage.local.set({ blockedSites: [] });
-  } else {
-    updateBlockRules(result.blockedSites);
-  }
-  
-  if (!result.lastStatsReset) {
-    chrome.storage.local.set({ 
-      lastStatsReset: new Date().toISOString(),
-      timeStats: {}
-    });
-  }
-});
-
-// Listen for changes to blocked sites
-chrome.storage.onChanged.addListener((changes, namespace) => {
-  if (namespace === 'local' && changes.blockedSites) {
-    updateBlockRules(changes.blockedSites.newValue);
-  }
-});
-
-async function updateBlockRules(blockedSites) {
-  const existingRules = await chrome.declarativeNetRequest.getDynamicRules();
-  const ruleIds = existingRules.map(rule => rule.id);
-  await chrome.declarativeNetRequest.updateDynamicRules({
-    removeRuleIds: ruleIds
-  });
-
-  const rules = blockedSites.map((site, index) => ({
-    id: index + 1,
-    priority: 1,
-    action: {
-      type: 'redirect',
-      redirect: {
-        url: chrome.runtime.getURL('blocked.html')
-      }
+// Initialize tracking data
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.local.set({
+    blockedSites: [],
+    todayStats: {
+      productiveTime: 0,
+      distractingTime: 0,
+      lastUpdate: Date.now()
     },
-    condition: {
-      urlFilter: site,
-      resourceTypes: ['main_frame']
-    }
-  }));
-
-  await chrome.declarativeNetRequest.updateDynamicRules({
-    addRules: rules
+    dailyStats: {}
   });
-}
-
-// Track active tab changes
-chrome.tabs.onActivated.addListener(async function(activeInfo) {
-  const tab = await chrome.tabs.get(activeInfo.tabId);
-  updateTimeTracking(tab);
 });
 
-// Track URL changes
-chrome.tabs.onUpdated.addListener(function(tabId, changeInfo, tab) {
-  if (changeInfo.url) {
-    updateTimeTracking(tab);
+// Track active tab time
+let lastActiveTime = Date.now();
+let currentTabId = null;
+
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  const now = Date.now();
+  if (currentTabId) {
+    await updateTimeTracking(currentTabId, now - lastActiveTime);
   }
+  currentTabId = activeInfo.tabId;
+  lastActiveTime = now;
 });
 
-// Handle window focus changes
-chrome.windows.onFocusChanged.addListener(function(windowId) {
+chrome.windows.onFocusChanged.addListener(async (windowId) => {
+  const now = Date.now();
   if (windowId === chrome.windows.WINDOW_ID_NONE) {
-    pauseTracking();
+    if (currentTabId) {
+      await updateTimeTracking(currentTabId, now - lastActiveTime);
+      currentTabId = null;
+    }
   } else {
-    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
-      if (tabs[0]) {
-        updateTimeTracking(tabs[0]);
+    const tab = await getCurrentTab();
+    if (tab) {
+      if (currentTabId) {
+        await updateTimeTracking(currentTabId, now - lastActiveTime);
       }
-    });
+      currentTabId = tab.id;
+      lastActiveTime = now;
+    }
   }
 });
 
-function getDomain(url) {
-  if (!url) return null;
-  try {
-    const urlObj = new URL(url);
-    return urlObj.hostname;
-  } catch (e) {
-    return null;
-  }
-}
-
-function isValidDomain(domain) {
-  if (!domain) return false;
-  return domain !== 'null' && 
-         domain !== 'undefined' && 
-         domain !== 'newtab' && 
-         !domain.includes('chrome-extension://') &&
-         !domain.includes('chrome://') &&
-         !domain.includes('edge://') &&
-         !domain.includes('about:');
-}
-
-function pauseTracking() {
-  if (isTracking) {
-    updateTime();
-    isTracking = false;
-  }
-  startTime = null;
-  currentTabId = null;
-  currentDomain = null;
-}
-
-function updateTimeTracking(tab) {
-  if (!tab || !tab.url) return;
-
-  const domain = getDomain(tab.url);
-  if (!isValidDomain(domain)) {
-    pauseTracking();
-    return;
-  }
-
-  // Update time for previous domain before switching
-  if (isTracking && currentDomain && currentDomain !== domain) {
-    updateTime();
-  }
-
-  currentTabId = tab.id;
-  currentDomain = domain;
-  startTime = Date.now();
-  isTracking = true;
-}
-
-function updateTime() {
-  if (!isTracking || !startTime || !currentDomain || !isValidDomain(currentDomain)) return;
-
-  const endTime = Date.now();
-  const timeSpent = endTime - startTime;
-
-  // Only update if time spent is at least 1 second
-  if (timeSpent >= 1000) {
-    chrome.storage.local.get(['timeStats'], function(result) {
-      const timeStats = result.timeStats || {};
-      timeStats[currentDomain] = Math.round((timeStats[currentDomain] || 0) + timeSpent);
-      chrome.storage.local.set({ timeStats });
-    });
-  }
-}
-
-// Reset stats at midnight
-function resetDailyStats() {
-  chrome.storage.local.get(['lastStatsReset'], function(result) {
-    const now = new Date();
-    const lastReset = new Date(result.lastStatsReset || 0);
+// Block distracting sites
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  // Only check when the URL has changed and is loaded
+  if (changeInfo.status === 'loading' && changeInfo.url) {
+    const { blockedSites = [] } = await chrome.storage.local.get(['blockedSites']);
+    const url = new URL(changeInfo.url);
+    const hostname = url.hostname;
     
-    if (now.getDate() !== lastReset.getDate() || 
-        now.getMonth() !== lastReset.getMonth() || 
-        now.getFullYear() !== lastReset.getFullYear()) {
-      chrome.storage.local.set({ 
-        timeStats: {},
-        lastStatsReset: now.toISOString()
+    // Check if the hostname matches any blocked site
+    const isBlocked = blockedSites.some(site => {
+      // Remove any protocol, www, and trailing slashes for comparison
+      const cleanSite = site.replace(/^(https?:\/\/)?(www\.)?/, '').replace(/\/$/, '');
+      const cleanHostname = hostname.replace(/^(www\.)?/, '');
+      return cleanHostname.includes(cleanSite);
+    });
+
+    if (isBlocked) {
+      chrome.tabs.update(tabId, {
+        url: chrome.runtime.getURL('blocked.html')
       });
     }
-  });
-}
-
-// Update time every second and check for daily reset
-setInterval(function() {
-  if (isTracking) {
-    updateTime();
   }
-  resetDailyStats();
-}, 1000);
+});
+
+// Also check on navigation
+chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
+  if (details.frameId === 0) { // Only check main frame
+    const { blockedSites = [] } = await chrome.storage.local.get(['blockedSites']);
+    const url = new URL(details.url);
+    const hostname = url.hostname;
+    
+    // Check if the hostname matches any blocked site
+    const isBlocked = blockedSites.some(site => {
+      const cleanSite = site.replace(/^(https?:\/\/)?(www\.)?/, '').replace(/\/$/, '');
+      const cleanHostname = hostname.replace(/^(www\.)?/, '');
+      return cleanHostname.includes(cleanSite);
+    });
+
+    if (isBlocked) {
+      chrome.tabs.update(details.tabId, {
+        url: chrome.runtime.getURL('blocked.html')
+      });
+    }
+  }
+});
+
+// Update statistics
+async function updateTimeTracking(tabId, duration) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab.url) return;
+
+    const hostname = new URL(tab.url).hostname;
+    const { blockedSites = [], todayStats = {}, dailyStats = {} } = 
+      await chrome.storage.local.get(['blockedSites', 'todayStats', 'dailyStats']);
+
+    const isDistracting = blockedSites.some(site => {
+      const cleanSite = site.replace(/^(https?:\/\/)?(www\.)?/, '').replace(/\/$/, '');
+      const cleanHostname = hostname.replace(/^(www\.)?/, '');
+      return cleanHostname.includes(cleanSite);
+    });
+    const today = new Date().toISOString().split('T')[0];
+
+    // Update today's stats
+    if (!todayStats.lastUpdate || new Date(todayStats.lastUpdate).toISOString().split('T')[0] !== today) {
+      // Reset stats for new day
+      todayStats.productiveTime = 0;
+      todayStats.distractingTime = 0;
+    }
+
+    if (isDistracting) {
+      todayStats.distractingTime = (todayStats.distractingTime || 0) + duration;
+    } else {
+      todayStats.productiveTime = (todayStats.productiveTime || 0) + duration;
+    }
+    todayStats.lastUpdate = Date.now();
+
+    // Update daily stats
+    if (!dailyStats[today]) {
+      dailyStats[today] = { sites: {} };
+    }
+    if (!dailyStats[today].sites[hostname]) {
+      dailyStats[today].sites[hostname] = { duration: 0, isDistracting };
+    }
+    dailyStats[today].sites[hostname].duration += duration;
+
+    await chrome.storage.local.set({ todayStats, dailyStats });
+  } catch (error) {
+    console.error('Error updating time tracking:', error);
+  }
+}

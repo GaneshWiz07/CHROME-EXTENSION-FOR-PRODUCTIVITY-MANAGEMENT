@@ -1,29 +1,27 @@
 {
   "manifest_version": 3,
-  "name": "Productivity Tracker",
-  "version": "1.0",
-  "description": "Track and manage time spent on websites",
+  "name": "FocusGuard",
+  "version": "1.0.0",
+  "description": "A productivity tracker that monitors website usage and helps maintain focus",
   "permissions": [
     "storage",
-    "webNavigation",
     "tabs",
-    "declarativeNetRequest"
+    "webNavigation",
+    "alarms",
+    "notifications"
   ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
-  "action": {
-    "default_popup": "popup.html"
-   
-    },
   "icons": {
     "16": "productivity16.png",
-       "48": "productivity48.png",
-        "128": "productivity128.png"
+    "48": "productivity48.png",
+    "128": "productivity128.png"
   },
+  "action": {
+    "default_popup": "popup.html"
   
+
+  },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   }
-  
 }

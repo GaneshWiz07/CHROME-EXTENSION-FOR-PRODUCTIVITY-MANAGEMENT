@@ -1,93 +1,179 @@
-document.addEventListener('DOMContentLoaded', function() {
-  const siteInput = document.getElementById('siteInput');
-  const addSiteButton = document.getElementById('addSite');
-  const blockedSitesList = document.getElementById('blockedSites');
-  const timeStats = document.getElementById('timeStats');
+import { formatTime, getCurrentTab } from './utils.js';
 
-  // Load blocked sites and display them
-  chrome.storage.local.get(['blockedSites'], function(result) {
-    const blockedSites = result.blockedSites || [];
-    displayBlockedSites(blockedSites);
-  });
+let currentTab = 'dashboard';
 
-  // Load and display time statistics
-  updateTimeStats();
-
-  // Add new site to block
-  addSiteButton.addEventListener('click', function() {
-    const site = siteInput.value.trim().toLowerCase();
-    if (site) {
-      chrome.storage.local.get(['blockedSites'], function(result) {
-        const blockedSites = result.blockedSites || [];
-        if (!blockedSites.includes(site)) {
-          blockedSites.push(site);
-          chrome.storage.local.set({ blockedSites }, function() {
-            displayBlockedSites(blockedSites);
-            siteInput.value = '';
-          });
-        }
-      });
-    }
-  });
-
-  function displayBlockedSites(sites) {
-    blockedSitesList.innerHTML = '';
-    sites.forEach(site => {
-      const li = document.createElement('li');
-      li.className = 'site-item';
-      li.innerHTML = `
-        <span>${site}</span>
-        <button class="remove-site" data-site="${site}">Remove</button>
-      `;
-      blockedSitesList.appendChild(li);
-    });
-
-    // Add remove button listeners
-    document.querySelectorAll('.remove-site').forEach(button => {
-      button.addEventListener('click', function() {
-        const siteToRemove = this.getAttribute('data-site');
-        chrome.storage.local.get(['blockedSites'], function(result) {
-          const blockedSites = result.blockedSites.filter(site => site !== siteToRemove);
-          chrome.storage.local.set({ blockedSites }, function() {
-            displayBlockedSites(blockedSites);
-          });
-        });
-      });
-    });
-  }
-
-  function formatTime(milliseconds) {
-    const totalSeconds = Math.round(milliseconds / 1000);
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-
-    if (hours > 0) {
-      return `${hours}h ${minutes}m`;
-    }
-    return `${minutes}m`;
-  }
-
-  function updateTimeStats() {
-    chrome.storage.local.get(['timeStats'], function(result) {
-      const stats = result.timeStats || {};
-      let statsHtml = '<ul style="list-style: none; padding: 0;">';
-      
-      Object.entries(stats)
-        .filter(([domain]) => domain && domain !== 'null' && domain !== 'undefined')
-        .sort(([, a], [, b]) => b - a)
-        .slice(0, 5)
-        .forEach(([domain, time]) => {
-          const formattedTime = formatTime(time);
-          statsHtml += `<li style="margin-bottom: 5px;">
-            ${domain}: ${formattedTime}
-          </li>`;
-        });
-      
-      statsHtml += '</ul>';
-      timeStats.innerHTML = statsHtml;
-    });
-  }
-
-  // Update stats every second
-  setInterval(updateTimeStats, 1000);
+// Initialize popup
+document.addEventListener('DOMContentLoaded', async () => {
+  setupTabNavigation();
+  await loadDashboard();
+  setupBlocklist();
+  setupReports();
 });
+
+function setupTabNavigation() {
+  const tabs = document.querySelectorAll('.tab-btn');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const tabName = tab.dataset.tab;
+      switchTab(tabName);
+    });
+  });
+}
+
+function switchTab(tabName) {
+  // Update active tab button
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tabName);
+  });
+
+  // Update active content
+  document.querySelectorAll('.tab-content').forEach(content => {
+    content.classList.toggle('active', content.id === tabName);
+  });
+
+  currentTab = tabName;
+}
+
+async function loadDashboard() {
+  const stats = await chrome.storage.local.get(['todayStats']);
+  const productiveTime = document.getElementById('productive-time');
+  const distractingTime = document.getElementById('distracting-time');
+  const currentSite = document.getElementById('current-site');
+
+  if (stats.todayStats) {
+    productiveTime.textContent = formatTime(stats.todayStats.productiveTime || 0);
+    distractingTime.textContent = formatTime(stats.todayStats.distractingTime || 0);
+  }
+
+  const tab = await getCurrentTab();
+  if (tab && tab.url) {
+    const hostname = new URL(tab.url).hostname;
+    currentSite.textContent = `Current site: ${hostname}`;
+  }
+}
+
+function setupBlocklist() {
+  const addSiteBtn = document.getElementById('add-site');
+  const newSiteInput = document.getElementById('new-site');
+
+  // Add site on button click
+  addSiteBtn.addEventListener('click', () => addBlockedSite());
+
+  // Add site on Enter key
+  newSiteInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      addBlockedSite();
+    }
+  });
+
+  updateBlockedSitesList();
+}
+
+async function addBlockedSite() {
+  const newSiteInput = document.getElementById('new-site');
+  let site = newSiteInput.value.trim();
+  
+  if (site) {
+    // Remove protocol and www if present
+    site = site.replace(/^(https?:\/\/)?(www\.)?/, '').replace(/\/$/, '');
+    
+    const { blockedSites = [] } = await chrome.storage.local.get(['blockedSites']);
+    
+    // Check if site is already blocked
+    if (!blockedSites.includes(site)) {
+      blockedSites.push(site);
+      await chrome.storage.local.set({ blockedSites });
+      updateBlockedSitesList();
+    }
+    
+    newSiteInput.value = '';
+  }
+}
+
+async function updateBlockedSitesList() {
+  const blockedSitesList = document.getElementById('blocked-sites');
+  const { blockedSites = [] } = await chrome.storage.local.get(['blockedSites']);
+
+  blockedSitesList.innerHTML = '';
+  blockedSites.forEach(site => {
+    const li = document.createElement('li');
+    li.className = 'blocked-site';
+    li.innerHTML = `
+      <span>${site}</span>
+      <button class="remove-site" data-site="${site}">Remove</button>
+    `;
+    blockedSitesList.appendChild(li);
+  });
+
+  // Add remove handlers
+  document.querySelectorAll('.remove-site').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const site = btn.dataset.site;
+      const { blockedSites = [] } = await chrome.storage.local.get(['blockedSites']);
+      const updatedSites = blockedSites.filter(s => s !== site);
+      await chrome.storage.local.set({ blockedSites: updatedSites });
+      updateBlockedSitesList();
+    });
+  });
+}
+
+function setupReports() {
+  const selectedDate = document.getElementById('selected-date');
+  const prevDay = document.getElementById('prev-day');
+  const nextDay = document.getElementById('next-day');
+
+  let currentDate = new Date();
+  updateDateDisplay();
+
+  prevDay.addEventListener('click', () => {
+    currentDate.setDate(currentDate.getDate() - 1);
+    updateDateDisplay();
+    loadReportData();
+  });
+
+  nextDay.addEventListener('click', () => {
+    const today = new Date();
+    if (currentDate < today) {
+      currentDate.setDate(currentDate.getDate() + 1);
+      updateDateDisplay();
+      loadReportData();
+    }
+  });
+
+  function updateDateDisplay() {
+    selectedDate.textContent = currentDate.toLocaleDateString();
+    loadReportData();
+  }
+
+  async function loadReportData() {
+    const dateKey = currentDate.toISOString().split('T')[0];
+    const { dailyStats = {} } = await chrome.storage.local.get(['dailyStats']);
+    const dayStats = dailyStats[dateKey] || { sites: {} };
+
+    // Update chart and breakdown
+    updateChart(dayStats);
+    updateSiteBreakdown(dayStats);
+  }
+}
+
+function updateChart(dayStats) {
+  const chartContainer = document.getElementById('daily-chart');
+  // Implement chart visualization using the dayStats data
+  // You could use a library like Chart.js here, or create a simple visualization
+}
+
+function updateSiteBreakdown(dayStats) {
+  const breakdownContainer = document.getElementById('site-breakdown');
+  const sites = Object.entries(dayStats.sites || {})
+    .sort(([, a], [, b]) => b.duration - a.duration);
+
+  breakdownContainer.innerHTML = `
+    <h3>Site Breakdown</h3>
+    ${sites.map(([site, data]) => `
+      <div class="site-stat">
+        <span>${site}</span>
+        <span>${formatTime(data.duration)}</span>
+      </div>
+    `).join('')}
+  `;
+}

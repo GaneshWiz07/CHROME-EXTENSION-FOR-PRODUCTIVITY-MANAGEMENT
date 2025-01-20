@@ -1,29 +1,61 @@
 <!DOCTYPE html>
 <html lang="en">
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <head>
-  <title>Productivity Tracker</title>
-  <link rel="stylesheet" href="popup.css">
+  <title>SiteSentry</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="container">
-    <h1><span id="logo">FocusGuard</span>-Productivity Tracker</h1>
-    
-    <div class="stats-section">
-      <h2>Today's Statistics</h2>
-      <div id="timeStats"></div>
-    </div>
-
-    <div class="block-section">
-      <h2>Block Sites</h2>
-      <div class="input-group">
-        <input type="text" id="siteInput" placeholder="Enter website (e.g., facebook.com)">
-        <button id="addSite">Add</button>
+    <header>
+      <h1>FocusGuard</h1>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+        <button class="tab-btn" data-tab="blocklist">Block List</button>
+        <button class="tab-btn" data-tab="reports">Reports</button>
       </div>
-      <ul id="blockedSites"></ul>
-    </div>
+    </header>
+
+    <main>
+      <section id="dashboard" class="tab-content active">
+        <div class="today-stats">
+          <h2>Today's Activity</h2>
+          <div class="stat-grid">
+            <div class="stat-card">
+              <h3>Productive Time</h3>
+              <p id="productive-time">0h 0m</p>
+            </div>
+            <div class="stat-card">
+              <h3>Distracting Time</h3>
+              <p id="distracting-time">0h 0m</p>
+            </div>
+          </div>
+          <div id="current-site"></div>
+        </div>
+      </section>
+
+      <section id="blocklist" class="tab-content">
+        <h2>Blocked Sites</h2>
+        <div class="add-site">
+          <input type="text" id="new-site" placeholder="Enter website URL">
+          <button id="add-site">Add Site</button>
+        </div>
+        <ul id="blocked-sites"></ul>
+      </section>
+
+      <section id="reports" class="tab-content">
+        <h2>Productivity Report</h2>
+        <div class="date-selector">
+          <button id="prev-day">←</button>
+          <span id="selected-date"></span>
+          <button id="next-day">→</button>
+        </div>
+        <div id="daily-chart"></div>
+        <div id="site-breakdown"></div>
+      </section>
+    </main>
   </div>
-  <script src="popup.js"></script>
+  <script type="module" src="popup.js"></script>
 </body>
 </html>
